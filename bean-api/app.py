@@ -350,3 +350,16 @@ def seed_7days(req: SeedRequest):
         t += step
 
     return {"ok": True, "sensor_id": req.sensor_id, "seeded": count}
+
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+# static 폴더 서빙
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# 대시보드 페이지
+@app.get("/dashboard")
+def dashboard():
+    return FileResponse("static/dashboard.html")
+
+
