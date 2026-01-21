@@ -75,11 +75,11 @@ def latest(sensor_id: str = "sensor_01"):
     # 더미 예측(아무거나 뜨게): 수분값으로 간단 규칙만
     m = float(last["moisture_percent"])
     if m >= 75:
-        dummy = {"treat_pred": "과습", "stage_pred": "V1", "note": "dummy_rule(m>=75)"}
+        dummy = {"treat_pred": "overhydration", "stage_pred": "V1", "note": "dummy_rule(m>=75)"}
     elif m <= 25:
-        dummy = {"treat_pred": "한발", "stage_pred": "V1", "note": "dummy_rule(m<=25)"}
+        dummy = {"treat_pred": "drought", "stage_pred": "V1", "note": "dummy_rule(m<=25)"}
     else:
-        dummy = {"treat_pred": "정상", "stage_pred": "V1", "note": "dummy_rule(else)"}
+        dummy = {"treat_pred": "normal", "stage_pred": "V1", "note": "dummy_rule(else)"}
 
     return {
         "ok": True,
@@ -126,3 +126,4 @@ def seed(sensor_id: str = "sensor_01", days: int = 7, step_minutes: int = 10):
         t += step
 
     return {"ok": True, "sensor_id": sensor_id, "seeded": count}
+
