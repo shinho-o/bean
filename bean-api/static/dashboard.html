@@ -1,10 +1,209 @@
-your_repo/
-  app.py
-  models/
-    len_reg.pkl
-    dia_reg.pkl
-    treat_model.pkl
-    stage_model.pkl
-  static/
-    dashboard.html
-  requirements.txt
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Bean SmartFarm Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .card { border:1px solid #ddd; border-radius:12px; padding:12px; min-width: 280px; }
+    label { display:block; font-size: 12px; margin-top:8px; color:#333; }
+    input, select, button { padding:10px; border-radius:10px; border:1px solid #ccc; width: 100%; box-sizing:border-box; }
+    button { cursor:pointer; border:none; background:#111; color:white; }
+    button.secondary { background:#555; }
+    pre { background:#f7f7f7; border:1px solid #eee; border-radius:12px; padding:12px; overflow:auto; }
+    .small { font-size:12px; color:#666; }
+    .ok { color:#0a7; font-weight:600; }
+    .bad { color:#c33; font-weight:600; }
+  </style>
+</head>
+<body>
+  <h2>Bean SmartFarm Dashboard</h2>
+  <p class="small">Render API: <span id="baseUrl"></span></p>
+
+  <div class="row">
+    <div class="card">
+      <h3>설정</h3>
+
+      <label>sensor_id</label>
+      <input id="sensorId" value="sensor_01"/>
+
+      <label>days_since_stage_start</label>
+      <input id="days" type="number" value="10" step="1"/>
+
+      <label>stage</label>
+      <select id="stage">
+        <option value="">(서버에 저장된 값/마지막값 사용)</option>
+        <option value="V1">V1</option>
+        <option value="V5">V5</option>
+        <option value="R1">R1</option>
+        <option value="R3">R3</option>
+        <option value="R5">R5</option>
+      </select>
+
+      <label>treatment</label>
+      <select id="treat">
+        <option value="">(서버에 저장된 값/마지막값 사용)</option>
+        <option value="과습">과습</option>
+        <option value="한발">한발</option>
+      </select>
+
+      <label>zone</label>
+      <input id="zone" value="0"/>
+
+      <div style="height:10px"></div>
+      <button id="btnRefresh">새로고침 (history + latest)</button>
+      <div style="height:8px"></div>
+      <button id="btnSeed" class="secondary">더미 7일치 생성(seed7d)</button>
+
+      <p id="status" class="small"></p>
+    </div>
+
+    <div class="card" style="flex:1; min-width:320px;">
+      <h3>토양수분 그래프 (최근 N개)</h3>
+      <canvas id="chart" height="120"></canvas>
+      <p class="small">※ ESP가 아직 안 올리면 더미(seed7d)로 그래프를 채울 수 있어.</p>
+    </div>
+
+    <div class="card" style="flex:1; min-width:320px;">
+      <h3>최신 예측 결과</h3>
+      <div id="latestBox" class="small"></div>
+      <pre id="predJson">{}</pre>
+    </div>
+  </div>
+
+<script>
+  const BASE = location.origin; // 같은 도메인(render)
+  document.getElementById("baseUrl").textContent = BASE;
+
+  const statusEl = document.getElementById("status");
+  function setStatus(msg, ok=true){
+    statusEl.textContent = msg;
+    statusEl.className = "small " + (ok ? "ok" : "bad");
+  }
+
+  // ===== Chart.js =====
+  const ctx = document.getElementById('chart').getContext('2d');
+  let chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ label: 'moisture_percent', data: [] }] },
+    options: {
+      responsive: true,
+      scales: {
+        x: { display: true },
+        y: { display: true, suggestedMin: 0, suggestedMax: 100 }
+      }
+    }
+  });
+
+  async function apiGet(path){
+    const r = await fetch(BASE + path);
+    if (!r.ok) throw new Error(`GET ${path} -> ${r.status}`);
+    return await r.json();
+  }
+  async function apiPost(path, body){
+    const r = await fetch(BASE + path, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(()=> "");
+      throw new Error(`POST ${path} -> ${r.status} ${t}`);
+    }
+    return await r.json();
+  }
+
+  function getForm(){
+    const sensor_id = document.getElementById("sensorId").value.trim();
+    const days = Number(document.getElementById("days").value || 0);
+    const stage = document.getElementById("stage").value || null;
+    const treatment = document.getElementById("treat").value || null;
+    const zone = document.getElementById("zone").value.trim() || "0";
+    return { sensor_id, days_since_stage_start: days, stage, treatment, zone };
+  }
+
+  async function loadHistory(){
+    const { sensor_id } = getForm();
+    const hist = await apiGet(`/history?sensor_id=${encodeURIComponent(sensor_id)}&n=300`);
+
+    const labels = hist.data.map(d => d.ts.slice(5,16).replace("T"," "));
+    const values = hist.data.map(d => d.moisture_percent);
+
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = values;
+    chart.update();
+    return hist;
+  }
+
+  async function loadLatest(){
+    const req = getForm();
+    const res = await apiPost(`/latest`, req);
+
+    const latestBox = document.getElementById("latestBox");
+    if (!res.ok) {
+      latestBox.innerHTML = `<span class="bad">no_data_for_sensor</span>`;
+      document.getElementById("predJson").textContent = JSON.stringify(res, null, 2);
+      return res;
+    }
+
+    latestBox.innerHTML = `
+      <div><b>latest ts</b>: ${res.latest.ts}</div>
+      <div><b>moisture</b>: ${res.latest.moisture_percent.toFixed(1)}%</div>
+      <div><b>treat_pred</b>: ${res.pred.treat.pred}</div>
+      <div><b>stage_pred</b>: ${res.pred.stage.pred}</div>
+      <div><b>stem_length</b>: ${res.pred.stem_length_mm_pred.toFixed(2)} mm</div>
+      <div><b>stem_diameter</b>: ${res.pred.stem_diameter_mm_pred.toFixed(2)} mm</div>
+    `;
+    document.getElementById("predJson").textContent = JSON.stringify(res, null, 2);
+    return res;
+  }
+
+  async function seed7d(){
+    const { sensor_id, stage, treatment, zone } = getForm();
+    // stage/treatment이 비어있으면 기본값으로
+    const body = {
+      sensor_id,
+      step_minutes: 10,
+      base: 55,
+      noise: 8,
+      daily_wave: 10,
+      stage: stage || "V1",
+      treatment: treatment || "과습",
+      zone: zone || "0"
+    };
+    return await apiPost(`/seed7d`, body);
+  }
+
+  async function refreshAll(){
+    try{
+      setStatus("불러오는 중...");
+      await loadHistory();
+      await loadLatest();
+      setStatus("완료!");
+    }catch(e){
+      console.error(e);
+      setStatus(String(e), false);
+    }
+  }
+
+  document.getElementById("btnRefresh").addEventListener("click", refreshAll);
+  document.getElementById("btnSeed").addEventListener("click", async ()=>{
+    try{
+      setStatus("더미 7일치 생성 중...");
+      await seed7d();
+      await refreshAll();
+      setStatus("더미 생성 + 갱신 완료!");
+    }catch(e){
+      console.error(e);
+      setStatus(String(e), false);
+    }
+  });
+
+  // 자동 로드
+  refreshAll();
+</script>
+</body>
+</html>
