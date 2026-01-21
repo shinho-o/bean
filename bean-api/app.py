@@ -133,3 +133,25 @@ def predict(req: PredictRequest):
         "stem_length_mm_pred": predict_one_regressor(LEN_REG, X),
         "stem_diameter_mm_pred": predict_one_regressor(DIA_REG, X),
     }
+
+from datetime import datetime
+from typing import Dict, Any
+
+# 메모리 저장소(센서별 마지막 값)
+LAST: Dict[str, Dict[str, Any]] = {}
+
+class LogRequest(BaseModel):
+    sensor_id: str = "sensor_01"
+    moisture_percent: float
+    raw: float | int
+
+@app.post("/log")
+def log_data(req: LogRequest):
+    LAST[req.sensor_id] = {
+        "sensor_id": req.sensor_id,
+        "moisture_percent": float(req.moisture_percent),
+        "raw": float(req.raw),
+        "ts": datetime.utcnow().isoformat() + "Z",
+    }
+    return {"ok": True, "saved": LAST[req.sensor_id]}
+
